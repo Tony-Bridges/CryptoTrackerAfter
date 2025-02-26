@@ -1,0 +1,67 @@
+def __init__(self, index, previous_hash, transactions, nonce=0, timestamp=None):
+        self.index = index
+        self.previous_hash = previous_hash
+        self.transactions = transactions
+        self.timestamp = timestamp or time.time()
+        self.nonce = nonce
+        self.hash = self.calculate_hash()
+        
+    def __repr__(self):
+        return "%04d: %s, %s : %s" % (self.index,str(self.timestamp),str(self.data),str(self.previous_hash))
+
+    def calculate_hash(self):
+        """Calculate the hash of the block using SHA-256."""
+        block_string = f"{self.index}{self.previous_hash}{self.transactions}{self.timestamp}{self.nonce}"
+        return hashlib.sha256(block_string.encode()).hexdigest()
+
+    def mine(self, difficulty):
+        """Mine the block by finding a nonce that meets the difficulty."""
+        while not self.hash.startswith("0" * difficulty):
+            self.nonce += 1
+            self.hash = self.calculate_hash()
+            
+def get_specific_cryptos():
+    # List of specific cryptocurrencies to analyze
+    cryptos = ["BTC-USD", "ETH-USD", "USDT-USD", "USDC-USD", "BNB-USD", "BUSD-USD", "XRP-USD", "ADA-USD"]
+    return cryptos
+def analyze_results(all_crypto_reports):
+    """
+    Analyzes the processed data from all classes and provides a comprehensive report.
+    """
+    overall_market_trend = {"upward": 0, "downward": 0, "stable": 0}
+    security_issues = {"anomalies": 0, "alerts": 0}
+    financial_health = {"positive": 0, "negative": 0, "neutral": 0}
+
+    for crypto, reports in all_crypto_reports.items():
+        # Market Trend Analysis
+        market_trend = reports["market_trend"]["trend"]
+        overall_market_trend[market_trend] += 1
+
+        # Security Analysis
+        security_issues["anomalies"] += len(reports["security_anomalies"])
+        security_issues["alerts"] += len(reports["security_alerts"])
+
+        # Financial Health Analysis (example based on RSI)
+        rsi = reports["financial_report"]["RSI"]
+        if rsi is not None:
+            if rsi < 30:
+                financial_health["positive"] += 1  # Potentially oversold
+            elif rsi > 70:
+                financial_health["negative"] += 1  # Potentially overbought
+            else:
+                financial_health["neutral"] += 1
+
+    # Overall Market Trend Summary
+    print("\n--- Overall Market Trend ---")
+    for trend, count in overall_market_trend.items():
+        print(f"{trend.capitalize()}: {count} cryptocurrencies")
+
+    # Security Issues Summary
+    print("\n--- Security Issues ---")
+    print(f"Total Anomalies: {security_issues['anomalies']}")
+    print(f"Total Alerts: {security_issues['alerts']}")
+
+    # Financial Health Summary
+    print("\n--- Financial Health ---")
+    for health, count in financial_health.items():
+        print(f"{health.capitalize()}: {count} cryptocurrencies")

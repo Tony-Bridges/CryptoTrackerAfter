@@ -1,0 +1,240 @@
+
+class RemedialAI:
+    def __init__(self):
+        # Initialize TF-IDF vectorizer and KMeans clustering
+        self.vectorizer = TfidfVectorizer()
+        self.cluster_model = KMeans(n_clusters=3)
+        self.feedback_data = []  # Store feedback for reinforcement learning
+        self.cluster_model = DBSCAN(eps=0.5, min_samples=2)  # Change to DBSCAN for density-based clustering
+
+    def analyze_code(self, code_samples: list):
+        """
+        AI-like function to optimize code or add functionality using machine learning.
+        :param code_samples: List of code snippets to analyze.
+        """
+        print("\n[AI]: Analyzing the blockchain and code for optimizations...")
+
+        # Step 1: Filter out None or non-string values
+        filtered_code_samples = [sample for sample in code_samples if isinstance(sample, str) and sample.strip()]
+
+        # Debugging output to identify any invalid data that was filtered out
+        if len(filtered_code_samples) < len(code_samples):
+            print(f"[AI]: Filtered out invalid samples. Valid samples: {len(filtered_code_samples)}")
+
+        # Ensure there's valid data for vectorization
+        if not filtered_code_samples:
+            print("[AI]: No valid code samples to analyze.")
+            return {}
+
+        try:
+            # Step 2: Create TF-IDF features from valid code samples
+            features = self.vectorizer.fit_transform(filtered_code_samples)
+            
+            # Step 3: Assign random labels (0 or 1) to ensure multiple classes
+            labels = [random.randint(0, 3) for _ in filtered_code_samples]
+
+            X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2
+                                                                , random_state=42)
+
+            # Step 4: Train a logistic regression model (for demonstration)
+            model = LogisticRegression(random_state=42)
+            model.fit(X_train, y_train,)
+            
+            # Convert any sets to strings
+            code_samples = [str(code) if isinstance(code, set) else code for code in code_samples]
+
+            
+            python_samples = [code for code in code_samples if code.startswith("def") or code.startswith("class")]
+            solidity_samples = [code for code in code_samples if code.startswith("pragma solidity")]
+
+
+            # Step 5: Cluster the code samples using KMeans
+            self.cluster_model.fit(features)
+            labels = self.cluster_model.labels_
+
+            # Debugging: Print each code sample and its assigned cluster
+            for i, label in enumerate(labels):
+                print(f"[AI]: Sample {i} assigned to Cluster {label}")
+
+            # Step 6: Generate suggestions based on clusters
+            suggestions = {}
+            for label, code in zip(labels, filtered_code_samples):
+                suggestions[label] = {
+                    "issue": "Sample issue detected",
+                    "solution": "Suggested code improvement"
+                }
+
+        # 4. Generate New Suggestions, Predict Their Usefulness, and Include Code Snippets
+            new_suggestions = [
+            {
+                "text": "Optimize block size for network efficiency.",
+                "code": """
+    def __init__(self, index, previous_hash, transactions, nonce=0, timestamp=None):
+        #... other attributes...
+        self.block_size = self.calculate_block_size()  # Add block size attribute
+
+    def calculate_block_size(self):
+        # Calculate the size of the block in bytes
+        #... implementation...
+        return block_size_in_bytes
+                        """
+                },
+                {
+                "text": "Implement a voting mechanism for consensus.",
+                "code": """
+    def vote_on_block(self, block, votes):
+                    # Implement a voting mechanism to add blocks based on votes
+                    #... implementation...
+                        """
+                },
+                {
+                "text": "Validate new blocks before adding them to the chain.",
+                "code": """           
+    def validate_new_block(self, new_block):
+        previous_block = self.chain[-1]
+        if new_block.previous_hash!= previous_block.hash:
+            raise ValueError("[Error]: Block validation failed! Mismatched previous hash.")
+                    #... add more validation checks as needed...
+                    print("[AI]: Block validated successfully.")
+                    """
+                },
+                {
+                "text": "Use Monte Carlo simulation for portfolio value forecasting.",
+                "code": """
+    def monte_carlo_simulation(initial_investment, mean_return, std_dev, num_simulations, num_years):
+        '''Simulates future portfolio values using Monte Carlo simulation.'''
+        np.random.seed(42)  # For reproducibility
+        portfolio_values =
+
+        for _ in range(num_simulations):
+            future_values = [initial_investment]
+            for _ in range(num_years):
+                annual_return = np.random.normal(mean_return, std_dev)
+                future_values.append(future_values[-1] * (1 + annual_return))
+            portfolio_values.append(future_values[-1])
+        return np.mean(portfolio_values), np.percentile(portfolio_values,)
+                                """
+                            },
+                            {
+                "text": "Forecast time series data with Exponential Smoothing.",
+                "code": """
+    def time_series_forecast(data):
+        '''Forecasts future values using Holt-Winters Exponential Smoothing.'''
+        model = ExponentialSmoothing(data, trend="add", seasonal="add", seasonal_periods=12)
+        fit_model = model.fit()
+        forecast = fit_model.forecast(steps=12)  # Forecast next 12 periods
+        return forecast
+                                """
+                            },
+                            {
+                "text": "Reduce data dimensionality with PCA.",
+                "code": """
+    def pca_analysis(data, n_components=2):
+            '''Performs PCA on the data to reduce dimensions.'''
+            pca = PCA(n_components=n_components)
+            transformed_data = pca.fit_transform(data)
+            explained_variance = pca.explained_variance_ratio_
+        return transformed_data, explained_variance
+                                """
+                            },
+                            {
+                "text": "Calculate regression slope and intercept.",
+                "code": """
+    def calculate_regression(data_x, data_y):
+        '''Calculates the slope, intercept, and R-squared of a linear regression.'''
+        slope, intercept, r_value, _, _ = linregress(data_x, data_y)
+        return slope, intercept, r_value ** 2
+                                """
+                },
+                #... more suggestions with code snippets
+            
+            #... more suggestions with code snippets
+        ]
+            
+            print("Features:")
+            print(features.toarray())  # Print the TF-IDF feature vectors
+
+        # Step 8: Analyze new suggestions
+            new_features = self.vectorizer.transform([s["text"] for s in new_suggestions])
+            predictions = model.predict(new_features)
+
+            print("\n[AI]: Suggestions for improvement:")
+            for suggestion, prediction in zip(new_suggestions, predictions):
+                label = "Good suggestion" if prediction == 1 else "Not recommended"
+                print(f"- {suggestion['text']} ({label})")
+                if prediction == 1:
+                    print("  Code snippet:")
+                    print(suggestion['code'])
+                logging.basicConfig(filename='economics.log', level=logging.ERROR) 
+                try:
+                    exec(suggestion['code'], globals(), locals())
+                    print("  Code executed successfully.")
+                except Exception as e:
+                    logging.error(f"Error executing code: {e}")
+                    print(f"  Error executing code: {e}")
+
+            return suggestions 
+    
+        except Exception as e:
+            print(f"[Error in analyze_code]: {e}")
+            return {}
+        
+    def _cluster_code_samples(self, code_samples: List[str]):
+        """
+        Cluster code samples using KMeans clustering.
+        """
+        features = self.vectorizer.fit_transform(code_samples)
+        labels = self.cluster_model.fit_predict(features)
+        return labels
+    
+    def _identify_common_issue(self, code_samples: List[str]):
+        """
+        Identify the most common issue in a cluster of code samples.
+        """
+        # Use TF-IDF to find the most significant terms
+        tfidf_scores = self.vectorizer.transform(code_samples).toarray()
+        avg_tfidf = np.mean(tfidf_scores, axis=0)
+        top_term_idx = np.argmax(avg_tfidf)
+        top_term = self.vectorizer.get_feature_names_out()[top_term_idx]
+
+        return f"Common issue related to: {top_term}"
+    
+
+    def _identify_common_issue(self, code_samples: List[str]):
+        """
+        Identify the most common issue in a cluster of code samples.
+        """
+        # Use TF-IDF to find the most significant terms
+        tfidf_scores = self.vectorizer.transform(code_samples).toarray()
+        avg_tfidf = np.mean(tfidf_scores, axis=0)
+        top_term_idx = np.argmax(avg_tfidf)
+        top_term = self.vectorizer.get_feature_names_out()[top_term_idx]
+
+        return f"Common issue related to: {top_term}"
+
+    def _generate_solution(self, issue: str):
+        """
+        Generate a solution for a given issue using a pre-trained code generation model.
+        """
+        prompt = f"Fix the following issue in Python code: {issue}"
+        solution = self.code_generator(prompt, max_length=100, num_return_sequences=1)
+        return solution[0]['generated_text']
+
+    def reinforcement_learning(self, feedback: Dict[str, Any]):
+        """
+        Use reinforcement learning to improve suggestions based on feedback.
+        """
+        self.feedback_data.append(feedback)
+        # Example: Adjust clustering or code generation based on feedback
+        if feedback["useful"]:
+            print("Feedback received: Suggestion was useful.")
+        else:
+            print("Feedback received: Suggestion was not useful. Adjusting model...")
+
+    def generate_optimized_code(self, code: str):
+        """
+        Generate optimized code using deep learning.
+        """
+        prompt = f"Optimize the following Python code:\n{code}"
+        optimized_code = self.code_generator(prompt, max_length=200, num_return_sequences=1)
+        return optimized_code[0]['generated_text']

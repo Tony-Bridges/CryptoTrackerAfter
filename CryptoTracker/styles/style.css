@@ -1,0 +1,81 @@
+/* Main styles */
+.stApp {
+    font-family: 'Inter', sans-serif;
+}
+
+/* Headers */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+/* Metrics */
+.st-emotion-cache-1r6slb0 {
+    background-color: rgba(28, 131, 225, 0.1);
+    border-radius: 10px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+}
+
+/* Charts */
+.js-plotly-plot {
+    border-radius: 10px;
+    padding: 1rem;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Buttons */
+.stButton button {
+    width: 100%;
+    border-radius: 5px;
+    transition: all 0.3s ease;
+}
+
+.stButton button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Sidebar */
+.css-1d391kg {
+    padding: 2rem 1rem;
+}
+
+/* Cards */
+.element-container {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 1rem;
+    margin: 1rem 0;
+}
+
+/* Dark theme modifications */
+.dark-theme .stApp {
+    background-color: #0E1117;
+    color: #FAFAFA;
+}
+
+.dark-theme .element-container {
+    background-color: #262730;
+}
+
+/* Light theme modifications */
+.light-theme .stApp {
+    background-color: #FFFFFF;
+    color: #0E1117;
+}
+
+.light-theme .element-container {
+    background-color: #F0F2F6;
+}
+
+/* Responsive design */
+@media screen and (max-width: 768px) {
+    .stApp {
+        padding: 1rem;
+    }
+    
+    .element-container {
+        margin: 0.5rem 0;
+    }
+}

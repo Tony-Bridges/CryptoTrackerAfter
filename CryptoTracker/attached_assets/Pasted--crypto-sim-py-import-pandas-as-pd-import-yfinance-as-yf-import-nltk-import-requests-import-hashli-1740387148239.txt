@@ -1,0 +1,1826 @@
+# crypto_sim.py
+import pandas as pd
+import yfinance as yf
+import nltk 
+import requests
+import hashlib
+import sha3
+import psycopg2
+import numpy as np
+import datetime
+import json
+import tracemalloc
+import logging
+import time
+import matplotlib.pyplot as plt
+import random
+from functools import wraps
+from rich.console import Console
+from rich.table import Table
+console = Console()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+from transformers import pipeline
+from bs4 import BeautifulSoup
+from tensorflow import keras
+from scipy.optimize import minimize
+from tensorflow import keras
+from sklearn.cluster import KMeans, DBSCAN
+from transformers import pipeline  # Hugging Face Transformers
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import LogisticRegression
+from statsmodels.tsa.arima.model import ARIMA 
+from typing import List, Dict, Any
+from textblob import TextBlob
+from scipy.optimize import minimize
+from sklearn.metrics import accuracy_score, classification_report
+import re
+from typing import List
+import yfinance as yf
+start_date = datetime.datetime(2024, 1, 1)
+end_date = datetime.datetime(2024, 12, 31)
+
+data = yf.download("AAPL", start=start_date, end=end_date)
+
+# Print the first 5 rows
+print(data.head().to_markdown(index=True, numalign="left", stralign="left"))
+
+# Print the columns and their data types
+print(data.info())
+
+
+class SupervisorAI:
+    def __init__(self, db_params):
+        """Initialize the SupervisorAI with PostgreSQL connection parameters."""
+        self.function_timings = {}
+        self.memory_snapshots = {}
+        self.db_params = db_params
+        self._initialize_database()
+
+    def _initialize_database(self):
+        """Creates the necessary performance_metrics table if it doesn't exist."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS performance_metrics (
+                id SERIAL PRIMARY KEY,
+                function_name TEXT NOT NULL,
+                execution_time REAL,
+                memory_usage BIGINT,
+                cpu_usage REAL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    def monitor_performance(self, func):
+        """Decorator to monitor the performance of a function."""
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.perf_counter()
+            tracemalloc.start()
+            result = func(*args, **kwargs)
+            end_time = time.perf_counter()
+            memory_usage = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            elapsed_time = end_time - start_time
+            logging.info(f"Function '{func.__name__}' executed in {elapsed_time:.4f} seconds, "
+                         f"using {memory_usage / 1024:.2f} KB of memory.")
+            self._save_performance_metrics(func.__name__, elapsed_time, memory_usage, 0.0)
+            return result
+        return wrapper
+
+    def _save_performance_metrics(self, function_name, execution_time, memory_usage, cpu_usage):
+        """Saves performance metrics to the PostgreSQL database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO performance_metrics (function_name, execution_time, memory_usage, cpu_usage)
+            VALUES (%s, %s, %s, %s)
+        """, (function_name, execution_time, memory_usage, cpu_usage))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    def analyze_performance(self):
+        """Analyzes all stored performance data and provides optimization suggestions."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT function_name, AVG(execution_time), AVG(memory_usage), AVG(cpu_usage)
+            FROM performance_metrics
+            GROUP BY function_name
+        """)
+        results = cursor.fetchall()
+        conn.close()
+
+        logging.info("\n--- Performance Analysis ---")
+        for func_name, avg_time, avg_memory, avg_cpu in results:
+            logging.info(f"Function '{func_name}' - Avg Time: {avg_time:.4f} sec, "
+                         f"Avg Memory: {avg_memory / 1024:.2f} KB, Avg CPU: {avg_cpu:.2f}%")
+            if avg_time > 1.0:
+                logging.warning(f"Suggestion: Optimize '{func_name}' - Avg execution time exceeds 1 second.")
+            if avg_memory > 1024 * 500:
+                logging.warning(f"Suggestion: '{func_name}' uses high memory (>500 KB). Consider optimizing.")
+    def save_performance_metrics(self, function_name, execution_time, memory_usage, cpu_usage):
+        """Saves performance metrics to the PostgreSQL database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO performance_metrics (function_name, execution_time, memory_usage, cpu_usage)
+                VALUES (%s, %s, %s, %s)
+            """, (function_name, execution_time, memory_usage, cpu_usage))
+        except Exception as e:
+            print(f"Error saving performance metrics: {e}")
+        conn.commit()
+        conn.close()
+
+
+
+class FinancialAI:
+    def __init__(self, lookback_periods=(7, 21), rsi_periods=14, volatility_data=None):
+        self.lookback_periods = lookback_periods
+        self.rsi_periods = rsi_periods
+        self.volatility_data = volatility_data if volatility_data else {}
+        self.model = self._build_lstm_model()
+
+    def analyze_market_data(self, data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            df = pd.DataFrame(data)
+
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date'])
+                df.set_index('Date', inplace=True)
+            elif 'timestamp' in df.columns:
+                df['Date'] = pd.to_datetime([datetime.datetime.fromtimestamp(ts) for ts in df['timestamp']])
+                df.set_index('Date', inplace=True)
+            else:
+                print("No 'Date' or 'timestamp' column found. Using index as date.")
+                df.index = pd.to_datetime(df.index)
+                df.index.name = 'Date'
+                df['Date'] = df.index
+
+            # Ensure 'Close' column is numeric and drop missing values
+            if 'Close' not in df.columns:
+                raise ValueError("Data must contain a 'Close' price column.")
+            df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+            df = df.dropna(subset=['Close'])
+
+
+
+            for period in self.lookback_periods:
+                print(f"Period: {period}, Type: {type(period)}")  # Debug print
+                
+                # Print the value of period
+                df[f'{period}-day MA'] = df['Close'].rolling(window=period).mean()
+
+        
+            delta = df['Close'].diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+
+            avg_gain = gain.rolling(window=self.rsi_periods).mean()
+            avg_loss = loss.rolling(window=self.rsi_periods).mean()
+
+            rs = avg_gain / avg_loss.replace(0, np.nan)
+            df['RSI'] = 100 - (100 / (1 + rs))
+
+            report = {
+                'current_price': df['Close'].iloc[-1] if not df.empty else None,
+                **{f'{period}-day MA': df[f'{period}-day MA'].iloc[-1] if not df.empty else None for period in self.lookback_periods},
+                'RSI': df['RSI'].iloc[-1] if not df.empty else None
+            }
+            return report
+
+        except Exception as e:
+            print(f"Error in analyze_market_data: {e}")
+            return {
+                'current_price': None,
+                '7-day MA': None,
+                '21-day MA': None,
+                'RSI': None
+            }
+            
+            
+
+    def assess_risk(self, portfolio: Dict[str, float]) -> float:
+        total_value = sum(portfolio.values())
+        if total_value == 0:
+            return 0
+
+        weights = {asset: quantity / total_value for asset, quantity in portfolio.items()}
+
+        weighted_volatility = 0
+        for asset, weight in weights.items():
+            volatility = self.volatility_data.get(asset)
+            if volatility is None:
+                print(f"Warning: Volatility data not available for {asset}. Using default of 0.1.")
+                volatility = 0.1
+            weighted_volatility += weight * volatility
+
+        return weighted_volatility
+
+    def forecast_price(self, data: List[Dict[str, Any]], periods: int = 7):
+        df = pd.DataFrame(data)
+
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'])
+            df.set_index('Date', inplace=True)
+        elif 'timestamp' in df.columns:
+            df['Date'] = pd.to_datetime([datetime.datetime.fromtimestamp(ts) for ts in df['timestamp']])
+            df.set_index('Date', inplace=True)
+        else:
+            print("No 'Date' or 'timestamp' column found. Using index as date.")
+            df.index = pd.to_datetime(df.index)
+            df.index.name = 'Date'
+            df['Date'] = df.index
+
+        df['Close'] = pd.to_numeric(df['Close'], errors='coerce').dropna()
+
+        if df.empty or len(df) < 2:
+            return np.array([np.nan] * periods)
+
+        try:
+            model = ARIMA(df['Close'], order=(5, 2, 0))
+            model_fit = model.fit()
+            forecast = model_fit.forecast(steps=periods)
+            return forecast.values
+
+        except Exception as e:
+            print(f"ARIMA forecasting error: {e}")
+            return np.array([np.nan] * periods)
+
+    def execute_trade(self, trade_order: Dict[str, Any]) -> bool:
+        required_keys = ["asset", "quantity", "order_type"]
+        if not all(key in trade_order for key in required_keys):
+            print(f"Invalid trade order format. Requires keys: {required_keys}")
+            return False
+
+        print(f"Executing trade: {trade_order}")
+        return True
+
+    def calculate_elasticity(self, qd_change, p_change):
+        if p_change == 0:
+            return float('inf')
+        return (qd_change / 100) / (p_change / 100)
+
+    def calculate_marginal_utility(self, delta_u, delta_q):
+        if delta_q == 0:
+            return float('inf')
+        return delta_u / delta_q
+
+    def calculate_average_cost(self, total_cost, quantity):
+        if quantity == 0:
+            return float('inf')
+        return total_cost / quantity
+
+    def calculate_marginal_cost(self, delta_tc, delta_q):
+        if delta_q == 0:
+            return float('inf')
+        return delta_tc / delta_q
+
+    def calculate_cpi(self, current_basket_cost, base_basket_cost):
+        if base_basket_cost == 0:
+            return float('inf')
+        return (current_basket_cost / base_basket_cost) * 100
+
+    def calculate_unemployment_rate(self, unemployed_count, labor_force):
+        if labor_force == 0:
+            return float('inf')
+        return (unemployed_count / labor_force) * 100
+
+    def calculate_gdp(self, consumption, investment, government_spending, exports, imports):
+        return consumption + investment + government_spending + (exports - imports)
+
+
+    def linear_regression(self, X, Y):
+        X = np.array(X).reshape(-1, 1)
+        model = LinearRegression()
+        model.fit(X, Y)
+        Y_hat = model.predict(X) # Predicted values
+        return model.intercept_, model.coef_, Y_hat # Return intercept, coefficient, and predictions
+
+    def r_squared(self, Y, Y_hat):
+        Y = np.array(Y)
+        Y_hat = np.array(Y_hat)
+        Y_bar = np.mean(Y)
+        SS_res = np.sum((Y - Y_hat)**2)
+        SS_tot = np.sum((Y - Y_bar)**2)
+        return 1 - (SS_res / SS_tot) if SS_tot!= 0 else 0
+
+    def calculate_npv(self, cash_flows, discount_rate):
+        npv = 0
+        for t, cf in enumerate(cash_flows):
+            npv += cf / (1 + discount_rate)**(t + 1)
+        return npv
+
+    def calculate_sharpe_ratio(self, rp, rf, sigma_p):
+        if sigma_p == 0:
+            return float('inf')
+        return (rp - rf) / sigma_p
+
+    def display_economic_calculations(self, calculations: Dict[str, Any]):
+        print("\n--- Economic Calculations ---")
+        for name, value in calculations.items():
+            print(f"{name}: {value}")
+
+    def display_macroeconomic_data(self, gdp, cpi, unemployment_rate):
+        print("\n--- Macroeconomic Data ---")
+        print(f"GDP: {gdp}")
+        print(f"CPI: {cpi}")
+        print(f"Unemployment Rate: {unemployment_rate}")
+        print("\n--- Macroeconomic Data ---")
+        print(f"GDP: {gdp}")
+        print(f"CPI: {cpi}")
+        print(f"Unemployment Rate: {unemployment_rate}")
+    
+    def monte_carlo_simulation(self, initial_investment, mean_return, std_dev, num_simulations=1000, num_years=10):
+        """
+        Simulate future portfolio values using Monte Carlo simulation.
+        :param initial_investment: Initial investment amount.
+        :param mean_return: Mean annual return.
+        :param std_dev: Standard deviation of annual returns.
+        :param num_simulations: Number of simulations to run.
+        :param num_years: Number of years to simulate.
+        :return: Mean portfolio value, 5th percentile, and 95th percentile.
+        """
+        np.random.seed(42)  # For reproducibility
+        portfolio_values = []
+
+        for _ in range(num_simulations):
+            future_values = [initial_investment]
+            for _ in range(num_years):
+                annual_return = np.random.normal(mean_return, std_dev)
+                future_values.append(future_values[-1] * (1 + annual_return))
+            portfolio_values.append(future_values[-1])
+
+        return np.mean(portfolio_values), np.percentile(portfolio_values, 5), np.percentile(portfolio_values, 95)
+
+    def plot_price_trend(self, data):
+        """
+        Plot the price trend of a cryptocurrency.
+        :param data: List of dictionaries containing 'Date' and 'Close' keys.
+        """
+        df = pd.DataFrame(data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df.set_index('timestamp', inplace=True)
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df['Close'], label='Close Price')
+        plt.title('Cryptocurrency Price Trend')
+        plt.xlabel('timestamp')
+        plt.ylabel('Price (USD)')
+        plt.legend()
+        plt.grid()
+        plt.show()
+
+    def plot_moving_averages(self, data, periods=(7, 21)):
+        """
+        Plot moving averages for a cryptocurrency.
+        :param data: List of dictionaries containing 'Date' and 'Close' keys.
+        :param periods: Tuple of periods for moving averages.
+        """
+        df = pd.DataFrame(data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df.set_index('timestamp', inplace=True)
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(df['Close'], label='Close Price')
+        for period in periods:
+            plt.plot(df['Close'].rolling(window=period).mean(), label=f'{period}-day MA')
+        plt.title('Cryptocurrency Moving Averages')
+        plt.xlabel('timestamp')
+        plt.ylabel('Price (USD)')
+        plt.legend()
+        plt.grid()
+        plt.show()
+
+    def plot_risk_metrics(self, returns):
+        """
+        Plot risk metrics like VaR and Sharpe Ratio.
+        :param returns: List of returns (e.g., daily returns).
+        """
+        plt.figure(figsize=(10, 6))
+        plt.hist(returns, bins=50, alpha=0.75, label='Returns Distribution')
+        plt.axvline(self.calculate_var(returns), color='red', linestyle='dashed', linewidth=2, label='VaR (95%)')
+        plt.title('Risk Metrics')
+        plt.xlabel('Returns')
+        plt.ylabel('Frequency')
+        plt.legend()
+        plt.grid()
+        plt.show()
+
+    def calculate_var(self, returns, alpha=0.05):
+        """
+        Calculate Value at Risk (VaR) for a given set of returns.
+        :param returns: List of returns.
+        :param alpha: Confidence level.
+        :return: VaR value.
+        """
+        return np.percentile(returns, alpha * 100)
+    
+    def save_market_data(self, ticker, market_data):
+        """Saves market data to the database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        for data_point in market_data:
+            try:
+                cursor.execute("""
+                    INSERT INTO cryptocurrency_prices (ticker, timestamp, close_price, volume)
+                    VALUES (%s, to_timestamp(%s), %s, %s)
+                """, (ticker, data_point['timestamp'], data_point['Close'], data_point['Volume']))
+            except Exception as e:
+                print(f"Error saving market data: {e}")
+        conn.commit()
+        conn.close()
+        
+    def save_market_data(self, ticker, market_data):
+        """Saves market data to the database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        for data_point in market_data:
+            try:
+                cursor.execute("""
+                    INSERT INTO cryptocurrency_prices (ticker, timestamp, close_price, volume)
+                    VALUES (%s, to_timestamp(%s), %s, %s)
+                """, (ticker, data_point['timestamp'], data_point['Close'], data_point['Volume']))
+            except Exception as e:
+                print(f"Error saving market data: {e}")
+        conn.commit()
+        conn.close()
+
+    def display_economic_calculations(self, calculations: Dict[str, Any]):
+        """
+        Display economic calculations in a table format.
+        """
+        table = Table(title="Economic Calculations")
+        table.add_column("Metric", justify="left", style="cyan")
+        table.add_column("Value", justify="right", style="green")
+
+        for name, value in calculations.items():
+            if isinstance(value, np.ndarray):
+                value = value.item()  # Convert numpy scalar to Python scalar    
+                table.add_row(name, f"{value:.4f}")
+
+        console.print(table)
+
+    def display_menu():
+        console.print("[bold cyan]Crypto Simulation Menu[/bold cyan]")
+        console.print("1. Analyze Market Data")
+        console.print("2. Plot Price Trends")
+        console.print("3. Plot Moving Averages")
+        console.print("4. Calculate Risk Metrics")
+        console.print("5. Run All Analyses")
+        console.print("6. Exit")
+
+    def run_cli(self):
+        """
+        Run the CLI interface.
+        """
+        while True:
+            self.display_menu(market_data)            
+            choice = input("Enter your choice: ")
+            if choice == "1":
+                # Call analyze_market_data
+                pass
+            elif choice == "2":
+                # Call plot_price_trend
+                pass
+            elif choice == "3":
+                # Call plot_moving_averages
+                pass
+            elif choice == "4":
+                # Call plot_risk_metrics
+                pass
+            elif choice == "5":
+                FinancialAI.analyze_market_data(market_data)
+                FinancialAI.plot_price_trend(market_data)
+                FinancialAI.plot_moving_averages(market_data)
+                FinancialAI.plot_risk_metrics([item['Close'] for item in market_data])
+            elif choice == "6":
+                break
+            else:
+                console.print("[bold red]Invalid choice![/bold red]")
+
+    def _build_lstm_model(self):
+        """Build an LSTM model for price forecasting."""
+        model = Sequential([
+            LSTM(50, return_sequences=True, input_shape=(60, 1)),  # 60-day lookback
+            LSTM(50),
+            Dense(1)
+        ])
+        model.compile(optimizer='adam', loss='mean_squared_error')
+        return model
+
+    def train_lstm_model(self, data):
+        """Train the LSTM model on historical data."""
+        df = pd.DataFrame(data)
+        df['Date'] = pd.to_datetime(df['Date'])
+        df.set_index('Date', inplace=True)
+        df['Close'] = pd.to_numeric(df['Close'], errors='coerce').dropna()
+
+        scaler = MinMaxScaler()
+        scaled_data = scaler.fit_transform(df[['Close']])
+
+        X, y = [], []
+        for i in range(60, len(scaled_data)):
+            X.append(scaled_data[i-60:i])
+            y.append(scaled_data[i])
+        X, y = np.array(X), np.array(y)
+
+        self.model.fit(X, y, epochs=20, batch_size=32, verbose=0)
+
+    def forecast_price_lstm(self, data):
+        """Forecast future prices using the LSTM model."""
+        df = pd.DataFrame(data)
+        df['Date'] = pd.to_datetime(df['Date'])
+        df.set_index('Date', inplace=True)
+        df['Close'] = pd.to_numeric(df['Close'], errors='coerce').dropna()
+
+        scaler = MinMaxScaler()
+        scaled_data = scaler.fit_transform(df[['Close']])
+
+        last_60_days = scaled_data[-60:]
+        X_test = np.array([last_60_days])
+        predicted_scaled_price = self.model.predict(X_test)
+        predicted_price = scaler.inverse_transform(predicted_scaled_price)
+        
+        return predicted_price[0][0]
+
+
+
+
+# Example usage (with improved volatility data handling):
+volatility_data = {'AAPL': 0.12, 'SOUN': 0.09, 'AAPL': 0.05}  # More realistic volatility
+
+ai = FinancialAI(volatility_data=volatility_data)  # Pass volatility data during initialization
+
+market_data = [{'Date': '2024-07-26', 'Close': 29000}, {'Date': '2024-07-27', 'Close': 29500}, {'Date': '2024-07-28', 'Close': 29200}, {'Date': '2024-07-29', 'Close': 29800}, {'Date': '2024-07-30', 'Close': 30000}, {'Date': '2024-07-31', 'Close': 30500}, {'Date': '2024-08-01', 'Close': 30200}, {'Date': '2024-08-02', 'Close': 30800}, {'Date': '2024-08-03', 'Close': 31000}, {'Date': '2024-08-04', 'Close': 31500}, {'Date': '2024-08-05', 'Close': 31200}, {'Date': '2024-08-06', 'Close': 31800}, {'Date': '2024-08-07', 'Close': 32000}, {'Date': '2024-08-08', 'Close': 31700}, {'Date': '2024-08-09', 'Close': 32200}, {'Date': '2024-08-10', 'Close': 32500}, {'Date': '2024-08-11', 'Close': 32800}, {'Date': '2024-08-12', 'Close': 32600}, {'Date': '2024-08-13', 'Close': 33000}, {'Date': '2024-08-14', 'Close': 33500}, {'Date': '2024-08-15', 'Close': 33200}]
+
+report = ai.analyze_market_data(market_data)
+print(report)
+
+report_forecast = ai.forecast_price(market_data)
+print(report_forecast)
+portfolio = {'BTC-USD': 0.5, 'ETH-USD': 0.3, 'AAPL': 0.2}
+risk = ai.assess_risk(portfolio)
+print(f"Portfolio risk: {risk}")
+
+trade = {"asset": "BTC-USD", "quantity": 0.01, "order_type": "BUY"}
+ai.execute_trade(trade)
+
+trade_invalid = {"asset": "BTC-USD", "quantity": 0.01} # Missing order_type
+ai.execute_trade(trade_invalid)
+
+
+class EconomicAI:
+    def __init__(self,db_params, lookback=60):
+        self.model = None
+        self.scaler = MinMaxScaler()
+        self.lookback = lookback
+        self.db_params = db_params
+
+    def train_model(self, data: List[Dict[str, Any]]):
+        try:
+            # Data preparation
+            df = pd.DataFrame(data)
+            df['Date'] = pd.to_datetime([datetime.datetime.fromtimestamp(ts) for ts in df['timestamp']])
+            df.set_index('Date', inplace=True)
+            df['Close'] = pd.to_numeric(df['Close'], errors='coerce').dropna()
+
+            if df.empty or len(df) <= self.lookback:
+                print("Insufficient data for training. Skipping.")
+                return
+
+            data = df['Close'].values.reshape(-1, 1)
+            scaled_data = self.scaler.fit_transform(data)
+
+            # Sequence creation
+            X, y = [], []
+            for i in range(self.lookback, len(scaled_data)):
+                X.append(scaled_data[i - self.lookback:i])
+                y.append(scaled_data[i])
+
+            X = np.array(X)
+            y = np.array(y)
+
+            if X.shape[0] < 2:
+                print("Not enough training samples. Skipping.")
+                return
+
+            # Splitting data into train and validation sets
+            X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+
+            # Model definition
+            self.model = Sequential([
+                LSTM(50, return_sequences=True, input_shape=(self.lookback, 1)),
+                LSTM(50),
+                Dense(1)
+            ])
+            self.model.compile(optimizer='adam', loss='mean_squared_error')
+
+            # Early stopping to prevent overfitting
+            early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+            self.model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=25, batch_size=32, verbose=0, callbacks=[early_stopping])
+            print("Model training complete.")
+        except Exception as e:
+            print(f"Error in train_model: {e}")
+
+    def predict_market_trends(self, data: List[Dict[str, Any]]):
+        if self.model is None:
+            print("Model not trained. Call train_model() first.")
+            return {"trend": "stable"}
+
+        try:
+            df = pd.DataFrame(data)
+            df['Date'] = pd.to_datetime([datetime.datetime.fromtimestamp(ts) for ts in df['timestamp']])
+            df.set_index('Date', inplace=True)
+            df['Close'] = pd.to_numeric(df['Close'], errors='coerce').dropna()
+
+            if df.empty or len(df) <= self.lookback:
+                print("Insufficient data for prediction. Returning stable.")
+                return {"trend": "stable"}
+
+            last_lookback = df['Close'][-self.lookback:].values.reshape(-1, 1)
+            scaled_lookback = self.scaler.transform(last_lookback)
+            X_test = np.reshape(scaled_lookback, (1, self.lookback, 1))
+
+            predicted_scaled_price = self.model.predict(X_test, verbose=0)
+            predicted_scaled_price = predicted_scaled_price.reshape(-1, 1)
+            predicted_price = self.scaler.inverse_transform(predicted_scaled_price)
+
+            current_price = df['Close'].iloc[-1]
+            trend = "upward" if predicted_price > current_price else "downward" if predicted_price < current_price else "stable"
+
+            # Confidence calculation
+            confidence = abs(predicted_price - current_price) / current_price
+            return {"trend": trend, "confidence": round(confidence[0][0], 2)}
+        except Exception as e:
+            print(f"Error in predict_market_trends: {e}")
+            return {"trend": "stable"}
+
+    def optimize_tokenomics(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
+        """Optimizes tokenomics based on the current market state."""
+        try:
+            market_sentiment = current_state.get('market_sentiment', 'neutral')
+            current_emission_rate = current_state.get('emission_rate', 1.0)
+
+            # Optimization function
+            def optimize_emission_rate(emission_rate, sentiment):
+                target_rate = 0.9 if sentiment == 'bearish' else 1.1 if sentiment == 'bullish' else 1.0
+                return abs(emission_rate - target_rate)
+
+            optimized_rate = minimize(optimize_emission_rate, current_emission_rate, args=(market_sentiment,)).x
+            current_state['emission_rate'] = float(optimized_rate)
+            return current_state
+        except Exception as e:
+            return {"error": f"Tokenomics optimization error: {e}"}
+
+    # Placeholder for scenario analysis
+    def simulate_scenarios(self, scenarios: List[Dict[str, Any]]):
+        """Simulates various market scenarios and predicts outcomes."""
+        print("Scenario simulation not implemented yet.")
+
+    # Placeholder for sentiment analysis
+    def analyze_sentiment(self, text_data: List[str]):
+        """Analyzes sentiment from text data to gauge market sentiment."""
+        print("Sentiment analysis not implemented yet.")
+    
+    def save_market_trend_predictions(self, cryptocurrency, timestamp, predicted_trend, confidence_score):
+        """Saves market trend predictions to the database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO market_trend_predictions (cryptocurrency, timestamp, predicted_trend, confidence_score)
+                VALUES (%s, to_timestamp(%s), %s, %s)
+            """, (cryptocurrency, timestamp, predicted_trend, confidence_score.item()))  # Use predicted_trend and confidence_score directly
+        except Exception as e:
+            print(f"Error saving market trend predictions: {e}")
+        conn.commit()
+        conn.close()
+
+    def fetch_public_dataset(dataset_name: str):
+        """Fetch publicly available datasets."""
+        if dataset_name == "yahoo_finance":
+            return yf.download("BTC-USD", start="2020-01-01", end="2023-01-01")
+        elif dataset_name == "kaggle_crypto":
+            # Load Kaggle dataset (placeholder)
+            return pd.read_csv("kaggle_crypto_data.csv")
+        else:
+            raise ValueError("Unsupported dataset.")
+
+class SecurityAI:
+    def __init__(self,db_params, contamination: float = 0.01, anomaly_threshold: float = -1.5):
+        self.model = IsolationForest(contamination=contamination)
+        self.anomaly_threshold = anomaly_threshold
+        self.trained = False # Flag to track model training
+
+    def train_model(self, transactions: List[Dict[str, Any]]) -> None:
+        """Trains the Isolation Forest model.  Crucial to separate training."""
+        if not transactions:
+            raise ValueError("No transactions provided for training.")
+
+        df = pd.DataFrame(transactions)
+
+        # Feature Engineering:  Add more relevant features
+        df['amount'] = df['amount'].astype(float) # Ensure amount is numeric
+        df['transaction_hour'] = pd.to_datetime(df['timestamp']).dt.hour if 'timestamp' in df else 0 # Example time-based feature
+        df['transaction_day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek if 'timestamp' in df else 0 # Example time-based feature
+        # Add other features like 'transaction_type', 'sender_account', 'receiver_account', etc. if available.
+
+
+        X = df[['amount', 'transaction_hour', 'transaction_day_of_week']].values # Train on multiple features
+        self.model.fit(X)
+        self.trained = True
+
+    def detect_anomalies(self, transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Detects anomalies in new transactions."""
+        if not self.trained:
+            raise RuntimeError("Model must be trained before detecting anomalies. Call train_model() first.")
+
+        if not transactions:
+            return []  # Return empty list if no transactions
+
+        df = pd.DataFrame(transactions)
+        df['amount'] = df['amount'].astype(float)
+        df['transaction_hour'] = pd.to_datetime(df['timestamp']).dt.hour if 'timestamp' in df else 0
+        df['transaction_day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek if 'timestamp' in df else 0
+        X = df[['amount', 'transaction_hour', 'transaction_day_of_week']].values
+
+        # Get anomaly scores instead of just -1/1
+        df['anomaly_score'] = self.model.decision_function(X)
+        df['anomaly'] = df['anomaly_score'] < self.anomaly_threshold  # Use threshold for flexibility
+
+        anomalies = df[df['anomaly']].to_dict('records')  # anomalies is now a boolean mask.
+        return anomalies
+
+    def monitor_network(self, network_data: Dict[str, Any]) -> List[str]:
+        alerts = []
+        volume = network_data.get('transaction_volume', 0)
+        if volume > 10000:
+            alerts.append(f"High transaction volume detected: {volume}")
+
+        failed_transactions = network_data.get('failed_transactions', 0)
+        if failed_transactions > 100:
+            alerts.append(f"High number of failed transactions: {failed_transactions}")
+
+        # Example: Check for sudden changes in transaction volume
+        historical_volume = network_data.get('historical_transaction_volume', [])  # Provide historical data
+        if historical_volume:
+            average_volume = sum(historical_volume) / len(historical_volume)
+            volume_change_percentage = abs((volume - average_volume) / average_volume) * 100
+            if volume_change_percentage > 50:  # Example threshold
+                alerts.append(f"Significant change in transaction volume detected: {volume_change_percentage:.2f}%")
+
+        return alerts
+
+    def save_block(self, block):
+        """Saves a block to the database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO blocks (block_height, timestamp, hash, miner_address, num_transactions)
+                VALUES (%s, to_timestamp(%s), %s, %s, %s)
+                RETURNING id
+            """, (block.index, block.timestamp, block.hash, "miner_address", len(block.transactions)))
+            block_id = cursor.fetchone()
+
+            # Save transactions
+            for transaction in block.transactions:
+                cursor.execute("""
+                    INSERT INTO transactions (hash, block_id, sender_address, receiver_address, amount, timestamp)
+                    VALUES (%s, %s, %s, %s, %s, to_timestamp(%s))
+                """, (hashlib.sha256(str(transaction).encode()).hexdigest(), block_id, transaction.get("from"), transaction.get("to"), transaction.get("amount"), block.timestamp))
+        except Exception as e:
+            print(f"Error saving block: {e}")
+        conn.commit()
+        conn.close()
+
+class DataAnalysisAI:
+    def __init__(self, db_params):
+        self.db_params = db_params
+          
+    def fetch_news_articles(self, query: str, language: str = 'en', num_articles: int = 5) -> List[Dict[str, Any]]:
+        try:
+            url = f"https://newsapi.org/v2/everything?q={query}&language={language}&apiKey=API_KEY"
+            response = requests.get(url)
+            data = response.json()
+            articles = data.get('articles', [])
+            return articles[:num_articles]
+        except Exception as e:
+            print(f"Error fetching news articles: {e}")
+            return []   
+    def fetch_market_data(self, ticker: str, start_date: str, end_date: str = None) -> List[Dict[str, Any]]:
+        try:
+            data = yf.download(ticker, start=start_date, end=end_date)
+            if data.empty:
+                print(f"No data found for {ticker} between {start_date} and {end_date}.")
+                return  # Return an empty list if no data is found
+
+            market_data = []
+            for index, row in data.iterrows():
+                market_data.append({
+                    'timestamp': index.timestamp(),
+                    'Close': row['Close'].item(),  # Extract numerical value from Ticker object
+                    'Volume': row['Volume'].item()  # Extract numerical value from Ticker object
+                })
+            return market_data
+        except Exception as e:
+            print(f"Error fetching data for {ticker}: {e}")
+            return
+
+    def process_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return data
+    
+    def save_market_data(self, ticker, market_data):
+        """Saves market data to the database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        for data_point in market_data:
+            try:
+                cursor.execute("""
+                    INSERT INTO cryptocurrency_prices (ticker, timestamp, close_price, volume)
+                    VALUES (%s, to_timestamp(%s), %s, %s)
+                """, (ticker, data_point['timestamp'], data_point['Close'], data_point['Volume']))
+            except Exception as e:
+                print(f"Error saving market data: {e}")
+        conn.commit()
+        conn.close()
+
+class CryptoFunctions:  # New class for cryptographic and blockchain functions
+    def sha256_hash(self, data: str) -> str:
+        """Generate SHA-256 hash of the input data."""
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    def keccak256_hash(self, data: str) -> str:
+        """Generate Keccak-256 hash of the input data."""
+        k = sha3.keccak_256()
+        k.update(data.encode())
+        return k.hexdigest()
+
+    def ecdsa_sign(self, private_key: str, message: str) -> str:
+        """Placeholder for ECDSA signing."""
+        print("ECDSA signing (placeholder - implement with a library)")
+        return "signature"
+
+    def ecdsa_verify(self, public_key: str, signature: str, message: str) -> bool:
+        """Placeholder for ECDSA verification."""
+        print("ECDSA verification (placeholder - implement with a library)")
+        return True
+
+    def generate_key_pair(self) -> Dict[str, str]:
+        """Placeholder for key pair generation."""
+        print("Key pair generation (placeholder - implement with a library)")
+        return {"public_key": "public", "private_key": "private"}
+
+    def proof_of_work(self, block_data: str, target: str) -> str:
+        """Perform proof-of-work to find a valid nonce."""
+        nonce = 0
+        while True:
+            data_to_hash = block_data + str(nonce)
+            hash_value = hashlib.sha256(data_to_hash.encode()).hexdigest()
+            if int(hash_value, 16) <= int(target, 16):
+                return str(nonce)
+            nonce += 1
+
+    def calculate_block_reward(self, initial_reward, halving_interval, block_height):
+        """Calculate the block reward based on halving intervals."""
+        return initial_reward * (1 / 2) ** (block_height // halving_interval)
+
+    def calculate_transaction_fee(self, gas_used, gas_price):
+        """Calculate the transaction fee."""
+        return gas_used * gas_price
+
+    def calculate_token_supply(self, initial_supply, inflation_rate, time):
+        """Calculate the token supply based on inflation rate."""
+        return initial_supply * (1 + inflation_rate) ** time
+
+    def calculate_merkle_root(self, transactions):
+        """Calculate the Merkle root of a list of transactions."""
+        if not transactions:
+            return None
+
+        hashes = [self.sha256_hash(str(tx)) for tx in transactions]
+
+        while len(hashes) > 1:
+            new_hashes = []
+            for i in range(0, len(hashes), 2):
+                if i + 1 < len(hashes):
+                    combined_hash = self.sha256_hash(hashes[i] + hashes[i + 1])
+                    new_hashes.append(combined_hash)
+                else:
+                    new_hashes.append(hashes[i])
+            hashes = new_hashes
+
+        return hashes[0] if hashes else None
+
+class BlockchainCodeGenerator:
+    
+    def generate_trading_code(self, financial_report: Dict[str, Any], market_trend: Dict[str, Any]) -> str:
+        # Improved and more robust code generation
+        code = "// Solidity code (example)\n"
+        code += "pragma solidity ^0.8.0;\n\n"
+        code += "contract TradingBot {\n"
+        code += "    //... (other contract code)...\n\n"
+
+        # Trading Logic (More sophisticated)
+        if market_trend['trend'] == 'upward':
+            if financial_report['RSI'] < 30:  # Oversold condition
+                code += "    function buy() public payable {\n"  # Make buy() payable
+                code += "        //... (logic to buy asset using msg.value)...\n"  # Use msg.value for ETH
+                code += "    }\n"
+            elif financial_report['RSI'] > 70:  # Overbought condition (consider selling)
+                code += "    function sell() public {\n"
+                code += "        //... (logic to sell asset)...\n"
+                code += "    }\n"
+
+        elif market_trend['trend'] == 'downward':
+            if financial_report['RSI'] > 70:  # Overbought
+                code += "    function sell() public {\n"
+                code += "        //... (logic to sell asset)...\n"
+                code += "    }\n"
+            elif financial_report['RSI'] < 30:  # Oversold (consider buying if you want to catch the dip)
+                code += "    function buy() public payable {\n"
+                code += "        //... (logic to buy asset using msg.value)...\n"
+                code += "    }\n"
+        elif market_trend['trend'] == 'stable':
+            # Add logic for stable market conditions if you need it.
+            code += "    // No specific action in stable market.\n"
+
+        code += "}\n"
+        return code
+
+class SentimentAnalyzer:
+    def __init__(self, db_params):
+        self.vectorizer = TfidfVectorizer()
+        self.model = LogisticRegression(max_iter=200)
+        self.sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+        self.db_params = db_params
+        
+    def preprocess_text(self, text: str) -> str:
+        """Preprocess the text by cleaning, removing special characters, and lowercasing."""
+        text = text.lower()
+        text = re.sub(r"[^a-zA-Z\s]", "", text)
+        return text.strip()
+
+    def analyze_sentiment(self, text_data: List[str]):
+        """Analyzes sentiment from text data using machine learning."""
+        try:
+            # Preprocess text data
+            cleaned_texts = [self.preprocess_text(text) for text in text_data]
+
+            # Create TF-IDF features
+            features = self.vectorizer.fit_transform(cleaned_texts)
+
+            # Create sentiment labels (1 for positive, 0 for negative)
+            labels = [1 if TextBlob(text).sentiment.polarity > 0 else 0 for text in cleaned_texts]
+
+            # Split data into training and test sets
+            X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.25, random_state=42)
+
+            # Train the Logistic Regression model
+            self.model.fit(X_train, y_train)
+
+            # Predict sentiment for test data
+            predictions = self.model.predict(X_test)
+
+            # Evaluate model performance
+            accuracy = accuracy_score(y_test, predictions)
+            print(f"Model Accuracy: {accuracy:.2%}")
+            print("Classification Report:")
+            print(classification_report(y_test, predictions))
+
+            # Predict sentiment for all input data
+            all_predictions = self.model.predict(features)
+            return all_predictions
+        except Exception as e:
+            print(f"Error in analyze_sentiment: {e}")
+            return None
+
+    def save_news_articles(self, articles):
+        """Saves news articles to the database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        for article in articles:
+            try:
+                cursor.execute("""
+                    INSERT INTO news_articles (url, title, content, source, timestamp, sentiment_score)
+                    VALUES (%s, %s, %s, %s, to_timestamp(%s), %s)
+                """, (article['url'], article['title'], article['content'], article.get("source"), article['timestamp'], article['sentiment_score']))
+            except Exception as e:
+                print(f"Error saving news articles: {e}")
+        conn.commit()
+        conn.close()
+
+
+class SmartContract:
+    def __init__(self):
+        self.balances = {"user1": 100, "user2": 50}
+        self.locked = False  # Reentrancy guard
+
+    def transfer(self, from_user, to_user, amount):
+        # Input validation
+        if not isinstance(from_user, str) or not isinstance(to_user, str):
+            raise ValueError("Invalid user: User must be a string.")
+        if not isinstance(amount, (int, float)) or amount <= 0:
+            raise ValueError("Invalid amount: Amount must be a positive number.")
+
+        if self.locked:  # Reentrancy check
+            print("Reentrancy detected! Transaction blocked.")
+            return False
+
+        if self.balances.get(from_user, 0) >= amount:
+            self.locked = True  # Lock before state changes
+            self.balances[from_user] -= amount
+            self.balances[to_user] = self.balances.get(to_user, 0) + amount  # Handle new users
+            self.locked = False  # Unlock after state changes
+            print(f"{from_user} transferred {amount} to {to_user}")
+            return True
+        else:
+            print(f"{from_user} insufficient funds")
+            return False
+
+    def get_balance(self, user):
+        if not isinstance(user, str):
+            raise ValueError("Invalid user: User must be a string.")
+        return self.balances.get(user, 0)  # Return 0 if user doesn't exist
+
+class Blockchain:
+    def __init__(self,db_params, difficulty=2):
+        self.chain = [self.create_genesis_block()]
+        self.difficulty = difficulty
+        self.pending_transactions = []
+        self.timestamp = time.time()
+        self.db_params = db_params
+        
+    def calculate_merkle_root(self, transactions):
+        """Calculate the Merkle root of a list of transactions."""
+        if not transactions:
+            return None
+        hashes = [hashlib.sha256(str(tx).encode()).hexdigest() for tx in transactions]
+        while len(hashes) > 1:
+            new_hashes = []
+            for i in range(0, len(hashes), 2):
+                if i + 1 < len(hashes):
+                    combined_hash = hashlib.sha256(hashes[i] + hashes[i + 1]).hexdigest()
+                    new_hashes.append(combined_hash)
+                else:
+                    new_hashes.append(hashes[i])
+            hashes = new_hashes
+        return hashes[0]    
+
+    def create_genesis_block(self):
+        """Create the first block in the chain (genesis block)."""
+        return Block(0, datetime.datetime.now(), "Genesis Block", "0")
+
+    def add_block(self, block):
+        """Add a new block to the chain after mining."""
+        if self.is_valid_block(block, self.chain[-1]):
+            block.merlke_root = self.calculate_merkle_root(block.transactions)
+            self.chain.append(block)
+            self.pending_transactions = []
+
+    def mine_block(self, miner_address):
+        """Mine a new block with pending transactions."""
+        previous_block = self.chain[-1]
+        new_block = Block(
+            index=len(self.chain),
+            previous_hash=previous_block.hash,
+            transactions=self.pending_transactions
+        )
+        new_block.mine(self.difficulty)
+        self.add_block(new_block)
+
+        # Reward the miner
+        self.add_transaction({"from": "network", "to": miner_address, "amount": 10})
+
+    def add_transaction(self, transaction):
+        """Add a new transaction to the list of pending transactions."""
+        self.pending_transactions.append(transaction)
+
+    def is_valid_block(self, block, previous_block):
+        """Check if a block is valid."""
+        if previous_block.index + 1!= block.index:
+            return False
+        elif previous_block.hash!= block.previous_hash:
+            return False
+        elif not self.is_valid_proof(block, self.difficulty):
+            return False
+        return True
+
+    def is_valid_proof(self, block, difficulty):
+        """Check if a proof (hash) is valid based on the difficulty."""
+        return block.hash.startswith("0" * difficulty)
+
+    def is_chain_valid(self):
+        """Check if the blockchain is valid."""
+        for i in range(1, len(self.chain)):
+            current_block = self.chain[i]
+            previous_block = self.chain[i - 1]
+            if not self.is_valid_block(current_block, previous_block):
+                return False
+        return True
+
+    def display_chain(self):
+        """Display the entire blockchain."""
+        for block in self.chain:
+            print(f"Index: {block.index}")
+            print(f"Previous Hash: {block.previous_hash}")
+            print(f"Transactions: {block.transactions}")
+            print(f"Timestamp: {block.timestamp}")
+            print(f"Nonce: {block.nonce}")
+            print(f"Hash: {block.hash}")
+            print("-" * 50)
+    
+    def save_block(self, block):
+        """Saves a block to the database."""
+        conn = psycopg2.connect(**self.db_params)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO blocks (block_height, timestamp, hash, miner_address, num_transactions)
+                VALUES (%s, to_timestamp(%s), %s, %s, %s)
+                RETURNING id
+            """, (block.index, block.timestamp, block.hash, "miner_address", len(block.transactions)))
+            block_id = cursor.fetchone()
+
+            # Save transactions
+            for transaction in block.transactions:
+                cursor.execute("""
+                    INSERT INTO transactions (hash, block_id, sender_address, receiver_address, amount, timestamp)
+                    VALUES (%s, %s, %s, %s, %s, to_timestamp(%s))
+                """, (hashlib.sha256(str(transaction).encode()).hexdigest(), block_id, transaction.get("from"), transaction.get("to"), transaction.get("amount"), block.timestamp))
+        except Exception as e:
+            print(f"Error saving block: {e}")
+        conn.commit()
+        conn.close()
+
+class RemedialAI:
+    def __init__(self):
+        # Load pre-trained code generation model (e.g., Hugging Face's CodeGPT)
+        self.code_generator = pipeline("text-generation", model="microsoft/CodeGPT-small-py")
+        self.vectorizer = TfidfVectorizer()
+        self.cluster_model = KMeans(n_clusters=5)  # Cluster code issues into 5 categories
+        self.feedback_data = []  # Store feedback for reinforcement learning
+
+
+class RemedialAI:
+    def __init__(self):
+        # Initialize TF-IDF vectorizer and KMeans clustering
+        self.vectorizer = TfidfVectorizer()
+        self.cluster_model = KMeans(n_clusters=3)
+        self.feedback_data = []  # Store feedback for reinforcement learning
+        self.cluster_model = DBSCAN(eps=0.5, min_samples=2)  # Change to DBSCAN for density-based clustering
+
+    def analyze_code(self, code_samples: list):
+        """
+        AI-like function to optimize code or add functionality using machine learning.
+        :param code_samples: List of code snippets to analyze.
+        """
+        print("\n[AI]: Analyzing the blockchain and code for optimizations...")
+
+        # Step 1: Filter out None or non-string values
+        filtered_code_samples = [sample for sample in code_samples if isinstance(sample, str) and sample.strip()]
+
+        # Debugging output to identify any invalid data that was filtered out
+        if len(filtered_code_samples) < len(code_samples):
+            print(f"[AI]: Filtered out invalid samples. Valid samples: {len(filtered_code_samples)}")
+
+        # Ensure there's valid data for vectorization
+        if not filtered_code_samples:
+            print("[AI]: No valid code samples to analyze.")
+            return {}
+
+        try:
+            # Step 2: Create TF-IDF features from valid code samples
+            features = self.vectorizer.fit_transform(filtered_code_samples)
+            
+            # Step 3: Assign random labels (0 or 1) to ensure multiple classes
+            labels = [random.randint(0, 3) for _ in filtered_code_samples]
+
+            X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2
+                                                                , random_state=42)
+
+            # Step 4: Train a logistic regression model (for demonstration)
+            model = LogisticRegression(random_state=42)
+            model.fit(X_train, y_train,)
+            
+            # Convert any sets to strings
+            code_samples = [str(code) if isinstance(code, set) else code for code in code_samples]
+
+            
+            python_samples = [code for code in code_samples if code.startswith("def") or code.startswith("class")]
+            solidity_samples = [code for code in code_samples if code.startswith("pragma solidity")]
+
+
+            # Step 5: Cluster the code samples using KMeans
+            self.cluster_model.fit(features)
+            labels = self.cluster_model.labels_
+
+            # Debugging: Print each code sample and its assigned cluster
+            for i, label in enumerate(labels):
+                print(f"[AI]: Sample {i} assigned to Cluster {label}")
+
+            # Step 6: Generate suggestions based on clusters
+            suggestions = {}
+            for label, code in zip(labels, filtered_code_samples):
+                suggestions[label] = {
+                    "issue": "Sample issue detected",
+                    "solution": "Suggested code improvement"
+                }
+
+        # 4. Generate New Suggestions, Predict Their Usefulness, and Include Code Snippets
+            new_suggestions = [
+            {
+                "text": "Optimize block size for network efficiency.",
+                "code": """
+    def __init__(self, index, previous_hash, transactions, nonce=0, timestamp=None):
+        #... other attributes...
+        self.block_size = self.calculate_block_size()  # Add block size attribute
+
+    def calculate_block_size(self):
+        # Calculate the size of the block in bytes
+        #... implementation...
+        return block_size_in_bytes
+                        """
+                },
+                {
+                "text": "Implement a voting mechanism for consensus.",
+                "code": """
+    def vote_on_block(self, block, votes):
+                    # Implement a voting mechanism to add blocks based on votes
+                    #... implementation...
+                        """
+                },
+                {
+                "text": "Validate new blocks before adding them to the chain.",
+                "code": """           
+    def validate_new_block(self, new_block):
+        previous_block = self.chain[-1]
+        if new_block.previous_hash!= previous_block.hash:
+            raise ValueError("[Error]: Block validation failed! Mismatched previous hash.")
+                    #... add more validation checks as needed...
+                    print("[AI]: Block validated successfully.")
+                    """
+                },
+                {
+                "text": "Use Monte Carlo simulation for portfolio value forecasting.",
+                "code": """
+    def monte_carlo_simulation(initial_investment, mean_return, std_dev, num_simulations, num_years):
+        '''Simulates future portfolio values using Monte Carlo simulation.'''
+        np.random.seed(42)  # For reproducibility
+        portfolio_values =
+
+        for _ in range(num_simulations):
+            future_values = [initial_investment]
+            for _ in range(num_years):
+                annual_return = np.random.normal(mean_return, std_dev)
+                future_values.append(future_values[-1] * (1 + annual_return))
+            portfolio_values.append(future_values[-1])
+        return np.mean(portfolio_values), np.percentile(portfolio_values,)
+                                """
+                            },
+                            {
+                "text": "Forecast time series data with Exponential Smoothing.",
+                "code": """
+    def time_series_forecast(data):
+        '''Forecasts future values using Holt-Winters Exponential Smoothing.'''
+        model = ExponentialSmoothing(data, trend="add", seasonal="add", seasonal_periods=12)
+        fit_model = model.fit()
+        forecast = fit_model.forecast(steps=12)  # Forecast next 12 periods
+        return forecast
+                                """
+                            },
+                            {
+                "text": "Reduce data dimensionality with PCA.",
+                "code": """
+    def pca_analysis(data, n_components=2):
+            '''Performs PCA on the data to reduce dimensions.'''
+            pca = PCA(n_components=n_components)
+            transformed_data = pca.fit_transform(data)
+            explained_variance = pca.explained_variance_ratio_
+        return transformed_data, explained_variance
+                                """
+                            },
+                            {
+                "text": "Calculate regression slope and intercept.",
+                "code": """
+    def calculate_regression(data_x, data_y):
+        '''Calculates the slope, intercept, and R-squared of a linear regression.'''
+        slope, intercept, r_value, _, _ = linregress(data_x, data_y)
+        return slope, intercept, r_value ** 2
+                                """
+                },
+                #... more suggestions with code snippets
+            
+            #... more suggestions with code snippets
+        ]
+            
+            print("Features:")
+            print(features.toarray())  # Print the TF-IDF feature vectors
+
+        # Step 8: Analyze new suggestions
+            new_features = self.vectorizer.transform([s["text"] for s in new_suggestions])
+            predictions = model.predict(new_features)
+
+            print("\n[AI]: Suggestions for improvement:")
+            for suggestion, prediction in zip(new_suggestions, predictions):
+                label = "Good suggestion" if prediction == 1 else "Not recommended"
+                print(f"- {suggestion['text']} ({label})")
+                if prediction == 1:
+                    print("  Code snippet:")
+                    print(suggestion['code'])
+                logging.basicConfig(filename='economics.log', level=logging.ERROR) 
+                try:
+                    exec(suggestion['code'], globals(), locals())
+                    print("  Code executed successfully.")
+                except Exception as e:
+                    logging.error(f"Error executing code: {e}")
+                    print(f"  Error executing code: {e}")
+
+            return suggestions 
+    
+        except Exception as e:
+            print(f"[Error in analyze_code]: {e}")
+            return {}
+        
+    def _cluster_code_samples(self, code_samples: List[str]):
+        """
+        Cluster code samples using KMeans clustering.
+        """
+        features = self.vectorizer.fit_transform(code_samples)
+        labels = self.cluster_model.fit_predict(features)
+        return labels
+    
+    def _identify_common_issue(self, code_samples: List[str]):
+        """
+        Identify the most common issue in a cluster of code samples.
+        """
+        # Use TF-IDF to find the most significant terms
+        tfidf_scores = self.vectorizer.transform(code_samples).toarray()
+        avg_tfidf = np.mean(tfidf_scores, axis=0)
+        top_term_idx = np.argmax(avg_tfidf)
+        top_term = self.vectorizer.get_feature_names_out()[top_term_idx]
+
+        return f"Common issue related to: {top_term}"
+    
+
+    def _identify_common_issue(self, code_samples: List[str]):
+        """
+        Identify the most common issue in a cluster of code samples.
+        """
+        # Use TF-IDF to find the most significant terms
+        tfidf_scores = self.vectorizer.transform(code_samples).toarray()
+        avg_tfidf = np.mean(tfidf_scores, axis=0)
+        top_term_idx = np.argmax(avg_tfidf)
+        top_term = self.vectorizer.get_feature_names_out()[top_term_idx]
+
+        return f"Common issue related to: {top_term}"
+
+    def _generate_solution(self, issue: str):
+        """
+        Generate a solution for a given issue using a pre-trained code generation model.
+        """
+        prompt = f"Fix the following issue in Python code: {issue}"
+        solution = self.code_generator(prompt, max_length=100, num_return_sequences=1)
+        return solution[0]['generated_text']
+
+    def reinforcement_learning(self, feedback: Dict[str, Any]):
+        """
+        Use reinforcement learning to improve suggestions based on feedback.
+        """
+        self.feedback_data.append(feedback)
+        # Example: Adjust clustering or code generation based on feedback
+        if feedback["useful"]:
+            print("Feedback received: Suggestion was useful.")
+        else:
+            print("Feedback received: Suggestion was not useful. Adjusting model...")
+
+    def generate_optimized_code(self, code: str):
+        """
+        Generate optimized code using deep learning.
+        """
+        prompt = f"Optimize the following Python code:\n{code}"
+        optimized_code = self.code_generator(prompt, max_length=200, num_return_sequences=1)
+        return optimized_code[0]['generated_text']
+
+class Block:
+    def __init__(self, index, previous_hash, transactions, nonce=0, timestamp=None):
+        self.index = index
+        self.previous_hash = previous_hash
+        self.transactions = transactions
+        self.timestamp = timestamp or time.time()
+        self.nonce = nonce
+        self.hash = self.calculate_hash()
+        
+    def __repr__(self):
+        return "%04d: %s, %s : %s" % (self.index,str(self.timestamp),str(self.data),str(self.previous_hash))
+
+    def calculate_hash(self):
+        """Calculate the hash of the block using SHA-256."""
+        block_string = f"{self.index}{self.previous_hash}{self.transactions}{self.timestamp}{self.nonce}"
+        return hashlib.sha256(block_string.encode()).hexdigest()
+
+    def mine(self, difficulty):
+        """Mine the block by finding a nonce that meets the difficulty."""
+        while not self.hash.startswith("0" * difficulty):
+            self.nonce += 1
+            self.hash = self.calculate_hash()
+            
+def get_specific_cryptos():
+    # List of specific cryptocurrencies to analyze
+    cryptos = ["BTC-USD", "ETH-USD", "USDT-USD", "USDC-USD", "BNB-USD", "BUSD-USD", "XRP-USD", "ADA-USD"]
+    return cryptos
+def analyze_results(all_crypto_reports):
+    """
+    Analyzes the processed data from all classes and provides a comprehensive report.
+    """
+    overall_market_trend = {"upward": 0, "downward": 0, "stable": 0}
+    security_issues = {"anomalies": 0, "alerts": 0}
+    financial_health = {"positive": 0, "negative": 0, "neutral": 0}
+
+    for crypto, reports in all_crypto_reports.items():
+        # Market Trend Analysis
+        market_trend = reports["market_trend"]["trend"]
+        overall_market_trend[market_trend] += 1
+
+        # Security Analysis
+        security_issues["anomalies"] += len(reports["security_anomalies"])
+        security_issues["alerts"] += len(reports["security_alerts"])
+
+        # Financial Health Analysis (example based on RSI)
+        rsi = reports["financial_report"]["RSI"]
+        if rsi is not None:
+            if rsi < 30:
+                financial_health["positive"] += 1  # Potentially oversold
+            elif rsi > 70:
+                financial_health["negative"] += 1  # Potentially overbought
+            else:
+                financial_health["neutral"] += 1
+
+    # Overall Market Trend Summary
+    print("\n--- Overall Market Trend ---")
+    for trend, count in overall_market_trend.items():
+        print(f"{trend.capitalize()}: {count} cryptocurrencies")
+
+    # Security Issues Summary
+    print("\n--- Security Issues ---")
+    print(f"Total Anomalies: {security_issues['anomalies']}")
+    print(f"Total Alerts: {security_issues['alerts']}")
+
+    # Financial Health Summary
+    print("\n--- Financial Health ---")
+    for health, count in financial_health.items():
+        print(f"{health.capitalize()}: {count} cryptocurrencies")
+
+def run_simulation_for_specific_cryptos(num_days=90):
+    # PostgreSQL connection parameters
+    db_params = {
+        "host": "localhost",
+        "port": 5432,
+        "dbname": "postgres",
+        "user": "postgres",
+        "password": "admin",  # Replace with your actual password
+        "connect_timeout": 10,
+        "sslmode": "prefer"
+    }
+
+    # Instantiate AI and helper classes
+    data_analysis_ai = DataAnalysisAI(db_params)
+    financial_ai = FinancialAI(lookback_periods=(7, 21),)
+    economic_ai = EconomicAI(db_params,lookback=60)
+    security_ai = SecurityAI(db_params)
+    blockchain_code_generator = BlockchainCodeGenerator()
+    crypto_functions = CryptoFunctions()
+    sentiment_analyzer = SentimentAnalyzer(db_params)
+    blockchain = Blockchain(db_params,difficulty=4)
+    remedial_ai = RemedialAI()
+
+    # Example usage of SupervisorAI
+    supervisor = SupervisorAI(db_params)
+
+    # Set simulation timeframe
+    end_date = datetime.date.today()
+    start_date = end_date - datetime.timedelta(days=num_days)
+    start_date_str = start_date.strftime("%Y-%m-%d")
+
+    # Get list of cryptocurrencies to analyze
+    cryptos = get_specific_cryptos()
+    all_crypto_reports = {}
+
+    # Create a blockchain instance
+    blockchain = Blockchain(db_params,difficulty=4)
+
+    # Loop through each cryptocurrency
+    for crypto in cryptos:
+        feedback_report = {}
+        print(f"\n--- Simulating for {crypto} ---")
+        smart_contract = SmartContract()
+        smart_contract.balances = {"user1": 100, "user2": 50}
+        market_data = data_analysis_ai.fetch_market_data(crypto, start_date_str)
+
+        # Print the market data
+        print(f"Market data for {crypto}: {market_data}")
+
+        if not market_data:
+            print(f"No data found for {crypto}. Skipping.")
+            all_crypto_reports[crypto] = {"error": "No market data"}
+            continue
+
+        processed_data = data_analysis_ai.process_data(market_data)
+
+        # Print the processed data
+        print(f"Processed data for {crypto}: {processed_data}")
+
+        financial_ai.plot_price_trend(market_data)
+        financial_ai.plot_moving_averages(market_data)
+        financial_ai.plot_risk_metrics([item['Close'] for item in market_data])
+
+        # Run CLI
+        ai.run_cli()
+        
+        
+        financial_report = financial_ai.analyze_market_data(processed_data)
+        print("Financial AI Report:", financial_report)
+        economic_ai.train_model(market_data)
+        market_trend = economic_ai.predict_market_trends(market_data)
+
+        # Print the market trend
+        print(f"Market trend for {crypto}: {market_trend}")
+
+        # Example Economic and Macroeconomic Calculations
+        elasticity = financial_ai.calculate_elasticity(5, 2)
+        marginal_utility = financial_ai.calculate_marginal_utility(10, 2)
+        avg_cost = financial_ai.calculate_average_cost(100, 10)
+        marginal_cost = financial_ai.calculate_marginal_cost(20, 5)
+        cpi = financial_ai.calculate_cpi(110, 100)
+        unemployment_rate = financial_ai.calculate_unemployment_rate(5, 100)
+        gdp = financial_ai.calculate_gdp(1000, 200, 150, 300, 100)
+
+        # Print economic calculations
+        print(f"Elasticity of Demand: {elasticity, marginal_utility, avg_cost, marginal_cost, cpi, unemployment_rate, gdp}")
+
+        # Prepare Data for Linear Regression
+        closing_prices = [item['Close'] for item in processed_data]
+        time_index = list(range(len(closing_prices)))
+
+        # Example Linear Regression
+        X = np.array(time_index).reshape(-1, 1)
+        Y = np.array(closing_prices)
+
+        # Print values of X and Y
+        print(f"X: {X}")
+        print(f"Y: {Y}")
+
+        # Calculate beta0, beta1, and Y_hat using linear regression
+        beta0, beta1, Y_hat = financial_ai.linear_regression(X, Y)
+
+        # Print Y_hat and its shape
+        print(f"Y_hat: {Y_hat}")
+        print(f"Shape of Y_hat: {np.shape(Y_hat)}")
+
+        r_squared_val = financial_ai.r_squared(Y, Y_hat)
+        npv = financial_ai.calculate_npv([-100, 20, 30, 40, 50], 0.1)
+        sharpe_ratio = financial_ai.calculate_sharpe_ratio(0.10, 0.05, 0.15)
+
+        economic_calculations = {
+            "Elasticity of Demand": elasticity,
+            "Marginal Utility": marginal_utility,
+            "Average Cost": avg_cost,
+            "Marginal Cost": marginal_cost,
+            "CPI": cpi,
+            "Unemployment Rate": unemployment_rate,
+            "Beta0 (Linear Regression Intercept)": beta0,
+            "Beta1 (Linear Regression Slope)": beta1,
+            "R-squared": r_squared_val,
+            "NPV": npv,
+            "Sharpe Ratio": sharpe_ratio,
+        }
+
+        financial_ai.display_economic_calculations(economic_calculations)
+        financial_ai.display_macroeconomic_data(gdp, cpi, unemployment_rate)
+
+        transactions = [
+            {'amount': np.random.randint(100, 10000), 'timestamp': (datetime.datetime.now() + datetime.timedelta(hours=i)).timestamp()}
+            for i in range(10)
+        ]
+
+        security_ai.train_model(transactions)
+        anomalies = security_ai.detect_anomalies(transactions)
+
+        network_data = {
+            'transaction_volume': np.random.randint(5000, 15000),
+            'failed_transactions': np.random.randint(0, 200),
+            'historical_transaction_volume': [np.random.randint(7000, 11000) for _ in range(7)]
+        }
+        security_alerts = security_ai.monitor_network(network_data)
+
+        # Smart Contract Interaction
+        try:
+            transfer_result = smart_contract.transfer("user1", "user2", 20)
+            print("Transfer Result:", transfer_result)
+
+            # Example of invalid input
+            smart_contract.transfer("user1", "user2", 1)
+        except ValueError as e:
+            print(f"Smart Contract Error: {e}")
+
+        try:
+            blockchain_code = blockchain_code_generator.generate_trading_code(financial_report, market_trend)
+            print("\n--- Blockchain Code (Example) ---")
+            print(blockchain_code)
+            feedback_report['blockchain_code'] = blockchain_code
+        except Exception as e:
+            print(f"Error generating blockchain code: {e}")
+            blockchain_code = ""  # Assign a default value if generation fails
+            
+            logging.basicConfig(filename='crypto_sim.log', level=logging.INFO) # Log the blockchain code   
+            logging.info("Blockchain code generated successfully.")
+        
+        except Exception as e:
+            print(f"Error generating blockchain code: {e}")
+            blockchain_code = ""  # Assign a default value if generation fails
+            logging.error(f"Error generating blockchain code: {e}")
+    
+
+        # Example Cryptographic and Blockchain Functions
+        example_data = "This is some data to hash"
+        sha256_hash = crypto_functions.sha256_hash(example_data)
+        keccak256_hash = crypto_functions.keccak256_hash(example_data)
+
+        block_data = "Block data to mine"
+        target = "00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        nonce = crypto_functions.proof_of_work(block_data, target)
+
+        block_reward = crypto_functions.calculate_block_reward(50, 210000, 100000)
+        transaction_fee = crypto_functions.calculate_transaction_fee(21000, 0.000000001)
+        token_supply = crypto_functions.calculate_token_supply(1000000, 0.05, 5)
+        
+
+        print("\n--- Cryptographic and Blockchain Functions ---")
+        print(f"SHA-256 Hash: {sha256_hash}")
+        print(f"Keccak-256 Hash: {keccak256_hash}")
+        print(f"Proof of Work Nonce: {nonce}")
+        print(f"Block Reward: {block_reward}")
+        print(f"Transaction Fee: {transaction_fee}")
+        print(f"Token Supply: {token_supply}")
+        
+    code_samples = [
+        blockchain_code,  # Analyze the generated blockchain code
+        """
+    def calculate_average(numbers):
+            total = sum(numbers)
+        return total / len(numbers)
+        """
+        ,
+        """
+        for i in range(10):
+            print(i)
+        """,financial_ai.display_economic_calculations(economic_calculations),
+        """
+    def calculate_moving_average(data, window_size):
+        moving_averages = []
+        for i in range(len(data) - window_size + 1):
+            window = data[i:i + window_size]
+            average = sum(window) / window_size
+            moving_averages.append(average)
+        return moving_averages
+        """,
+        
+        {"""
+    def calculate_moving_average(data, window_size):
+        moving_averages = []
+        for i in range(len(data) - window_size + 1):
+            window = data[i:i + window_size]
+            average = sum(window) / window_size
+            moving_averages.append(average)
+        return moving_averages
+        """
+        },
+        {
+        """ 
+    def monte_carlo_simulation(initial_investment, mean_return, std_dev, num_simulations, num_years):
+        '''Simulates future portfolio values using Monte Carlo simulation.'''
+        np.random.seed(42)  # For reproducibility
+        portfolio_values = []
+
+        for _ in range(num_simulations):
+            future_values = [initial_investment]
+            for _ in range(num_years):
+                annual_return = np.random.normal(mean_return, std_dev)
+                future_values.append(future_values[-1] * (1 + annual_return))
+            portfolio_values.append(future_values[-1])
+
+        return np.mean(portfolio_values), np.percentile(portfolio_values, 5), np.percentile(portfolio_values, 95)
+            """},
+        {
+        """
+    def time_series_forecast(data):
+            '''Forecasts future values using Holt-Winters Exponential Smoothing.'''
+            model = ExponentialSmoothing(data, trend="add", seasonal="add", seasonal_periods=12)
+            fit_model = model.fit()
+            forecast = fit_model.forecast(steps=12)  # Forecast next 12 periods
+        return forecast
+        """},
+        {
+        """
+    def pca_analysis(data, n_components=2):
+            '''Performs PCA on the data to reduce dimensions.'''
+            pca = PCA(n_components=n_components)
+            transformed_data = pca.fit_transform(data)
+            explained_variance = pca.explained_variance_ratio_
+        return transformed_data, explained_variance
+        """},
+                    
+                ]
+    
+    filtered_code_samples = [code for code in code_samples if isinstance(code, str) and code.strip()]
+    suggestions = remedial_ai.analyze_code(filtered_code_samples)
+    
+
+            
+                
+    suggestions = remedial_ai.analyze_code(code_samples)
+        #add more code samples if needed
+    
+    # Print suggestions
+    print("\n--- Remedial AI Suggestions ---")
+    if suggestions:  # Check if there are any suggestions
+        for label, suggestion in suggestions.items():
+            print(f"Cluster {label}:")
+            print(f"  Issue: {suggestion['issue']}")
+            print(f"  Solution: {suggestion['solution']}")
+
+        # Example: Apply a suggestion (replace with your actual logic)
+        chosen_suggestion = random.choice(list(suggestions.values()))
+        try:
+            exec(chosen_suggestion['solution'], globals(), locals())
+            print(f"Applied suggestion: {chosen_suggestion['solution']}")
+        except Exception as e:
+            print(f"Error applying suggestion: {e}")
+    else:
+        print("No suggestions from Remedial AI.")
+
+
+    # Save market data
+    data_analysis_ai.save_market_data(crypto, market_data)
+
+    # Save market trend predictions
+    timestamp = datetime.datetime.now().timestamp()
+    economic_ai.save_market_trend_predictions(crypto, timestamp, market_trend['trend'], market_trend['confidence'])
+
+    # Save block data
+    # Define new_block before saving it
+    new_block = blockchain.chain[-1]
+    blockchain.save_block(new_block)
+
+    # Save news articles (example)
+    articles = [
+        {
+            'url': 'https://www.coindesk.com/markets/2023/12/20/bitcoin-price-risks-further-decline-after-breaking-key-support-level/',
+            'title': 'Bitcoin Price Risks Further Decline After Breaking Key Support Level',
+            'content': 'Bitcoin (BTC) has broken below a key support level, putting the cryptocurrency at risk of further decline.',
+            'source': 'CoinDesk',
+            'timestamp': datetime.datetime.now().timestamp(),
+            'sentiment_score': -0.5  # Example sentiment score
+        },
+        #... more articles
+    ]
+    sentiment_analyzer.save_news_articles(articles)
+
+    all_crypto_reports[crypto] = {
+        "financial_report": financial_report,
+        "market_trend": market_trend,
+        "security_anomalies": anomalies,
+        "security_alerts": security_alerts,
+        "feedback_report": feedback_report,
+        #... other reports
+    }
+
+    # Display the blockchain
+    print("\n--- Blockchain ---")
+    blockchain.display_chain()
+
+    # Analyze the results from all AIs
+    analyze_results(all_crypto_reports)
+
+    # Analyze performance based on historical data
+    supervisor.analyze_performance()
+    
+    
+# Run the simulation
+if __name__ == "__main__":
+    run_simulation_for_specific_cryptos()
